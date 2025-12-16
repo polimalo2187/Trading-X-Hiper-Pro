@@ -1,6 +1,6 @@
 # 🚀 Trading X Hiper Pro  
 
-![Trading X Hiper Pro Logo](assets/acts-logo.png)
+![Trading X Hiper Pro Logo](assets/file_00000000082071f78721dafc49f503ec.png)
 
 Bot profesional de trading automático para **HyperLiquid PERP**, construido en **Python** y totalmente integrado con **Telegram**.
 
