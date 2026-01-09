@@ -1,0 +1,85 @@
+# ============================================================
+# TRADING LOOP – Trading X Hyper Pro
+# Archivo 10/10 – Operaciones reales 24/7 (VERSIÓN FINAL)
+# ============================================================
+
+import asyncio
+from telegram import error as tg_error
+from telegram.ext import Application
+
+from app.database import get_all_users, user_is_ready
+from app.trading_engine import execute_trade
+from app.config import SCAN_INTERVAL
+
+
+# ============================================================
+# ENVÍO SEGURO DE MENSAJES (ANTI-FLOOD)
+# ============================================================
+
+async def send_message_safe(app: Application, user_id: int, text: str):
+    """Envía mensajes de forma segura manejando FloodWait y errores."""
+    try:
+        await app.bot.send_message(chat_id=user_id, text=text)
+
+    except tg_error.RetryAfter as e:
+        wait_time = int(e.retry_after) + 1
+        print(f"⏳ FloodWait detectado. Esperando {wait_time}s...")
+        await asyncio.sleep(wait_time)
+        await app.bot.send_message(chat_id=user_id, text=text)
+
+    except Exception as e:
+        print(f"⚠ No pude enviar mensaje a {user_id}: {e}")
+
+
+# ============================================================
+# LOOP PRINCIPAL – 24/7
+# ============================================================
+
+async def trading_loop(app: Application):
+    """
+    Loop de trading 24/7.
+    Usa la MISMA Application del bot principal.
+    No crea bots duplicados.
+    No bloquea asyncio.
+    """
+
+    print("🔄 Trading Loop iniciado — Operando 24/7...")
+
+    loop = asyncio.get_running_loop()
+
+    while True:
+        try:
+            users = get_all_users()
+
+            for user in users:
+                user_id = user.get("user_id")
+                if not user_id:
+                    continue
+
+                if not user_is_ready(user_id):
+                    continue
+
+                # =====================================================
+                # EJECUTAR TRADE REAL (THREAD SEPARADO)
+                # =====================================================
+                result = await loop.run_in_executor(
+                    None,
+                    execute_trade,
+                    user_id
+                )
+
+                # =====================================================
+                # ENVÍO DEL RESULTADO AL USUARIO
+                # =====================================================
+                await send_message_safe(app, user_id, result)
+
+                # Pausa mínima anti-flood
+                await asyncio.sleep(0.6)
+
+        except Exception as fatal:
+            print("❌ Error grave en trading_loop:", fatal)
+            print("🛡 Reiniciando ciclo automáticamente...")
+            await asyncio.sleep(2)
+
+        # Pausa entre ciclos principales
+        await asyncio.sleep(SCAN_INTERVAL)
