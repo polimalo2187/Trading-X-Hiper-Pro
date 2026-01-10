@@ -15,7 +15,7 @@ from app.hyperliquid_client import get_price
 # BUFFER DE PRECIOS (SCALPING REAL FUNCIONAL)
 # ============================================================
 
-PRICE_WINDOW = 2   # 2 ticks reales = microtendencia válida
+PRICE_WINDOW = 4   # 🔥 FIX REAL: acumula micro-movimiento (NO rompe scalping)
 
 price_buffer = {}
 last_update_time = {}
