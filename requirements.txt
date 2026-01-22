@@ -4,3 +4,4 @@ requests==2.31.0
 httpx==0.25.2
 eth-account==0.10.0
 hyperliquid-python-sdk
+eth-account>=0.13.5,<0.14.0
