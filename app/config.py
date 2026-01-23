@@ -68,7 +68,7 @@ MIN_CAPITAL = 5.0
 
 # 🔥 Porcentaje base del capital por trade
 # (luego se escala por fuerza de señal)
-POSITION_PERCENT = 0.35
+POSITION_PERCENT = 1.0
 
 # 🔥 Trades simultáneos permitidos por usuario
 MAX_CONCURRENT_TRADES = 3
