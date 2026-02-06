@@ -75,7 +75,7 @@ TRAIL_RETRACE_PRICE = 0.002000  # CIERRA SI RETROCEDE 0.20% DESDE EL MAX
 
 # ✅ SL por fuerza
 SL_MIN_PRICE = 0.011700  # SL FIJO 1.17% PRECIO (x3 incluido)
-SL_MAX_PRICE = 0.011700  # SL FIJO 1.17% PRECIO (x3 incluido)
+SL_MAX_PRICE = 0.013333  # SL FIJO 1.33% PRECIO (x3 incluido)
 
 # ============================================================
 # STATE (rate limit / cooldown) — requerido por trading_loop
