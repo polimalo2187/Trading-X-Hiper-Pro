@@ -105,7 +105,7 @@ SL_MAX = float(os.getenv("SL_MAX", str(SL_MAX_PRICE)))
 # GESTIÓN DE RIESGO
 # ============================================================
 
-MIN_CAPITAL = float(os.getenv("MIN_CAPITAL", "4.0"))
+MIN_CAPITAL = float(os.getenv("MIN_CAPITAL", "5.0"))
 POSITION_PERCENT = float(os.getenv("POSITION_PERCENT", "1.0"))
 
 # ✅ Un solo trade a la vez
