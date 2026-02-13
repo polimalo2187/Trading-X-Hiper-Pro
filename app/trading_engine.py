@@ -72,10 +72,10 @@ MIN_QTY_COIN = 0.0001    # qty mínimo en coin (seguridad)
 
 # ✅ NUEVA LÓGICA TP/TRAIL
 TP_ACTIVATE_TRAIL_PRICE = 0.006667  # ACTIVA TRAILING 0.66% PRECIO (x3 incluido)
-TRAIL_RETRACE_PRICE = 0.005000  # CIERRA SI RETROCEDE 0.50% DESDE EL MAX
+TRAIL_RETRACE_PRICE = 0.003333  # CIERRA SI RETROCEDE 0.33% DESDE EL MAX
 
 # ✅ SL por fuerza
-SL_MIN_PRICE = 0.011700  # SL FIJO 1.17% PRECIO (x3 incluido)
+SL_MIN_PRICE = 0.006667  # SL FIJO 0.66% PRECIO (x3 incluido)
 
 # ============================================================
 # STATE (rate limit / cooldown) — requerido por trading_loop
