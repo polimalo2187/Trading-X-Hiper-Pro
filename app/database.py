@@ -348,15 +348,17 @@ def mark_expiry_notified(user_id: int):
 # TRADES + INTERÉS COMPUESTO
 # ============================================================
 
-def register_trade(user_id, symbol, side, entry_price, exit_price, qty, profit, best_score):
+def register_trade(user_id, symbol, side, entry_price, exit_price, qty, profit, best_score, **extra_fields):
     """
     Registra el trade.
 
     Nota:
     - No aplica interés compuesto (capital configurado eliminado).
     - El sizing/uso de capital debe venir del balance real del exchange.
+    - `profit` debe llegar NETO (realized pnl - fees).
+    - `extra_fields` permite persistir metadatos de auditoría sin romper llamadas antiguas.
     """
-    trades_col.insert_one({
+    doc = {
         "user_id": int(user_id),
         "symbol": str(symbol),
         "side": str(side),
@@ -365,8 +367,22 @@ def register_trade(user_id, symbol, side, entry_price, exit_price, qty, profit, 
         "qty": _safe_float(qty, 0.0),
         "profit": _safe_float(profit, 0.0),
         "best_score": _safe_float(best_score, 0.0),
-        "timestamp": datetime.utcnow()
-    })
+        "timestamp": datetime.utcnow(),
+    }
+
+    for key, value in (extra_fields or {}).items():
+        if value is None:
+            continue
+        if key in {"fees", "gross_pnl", "realized_fills", "opened_at_ms"}:
+            doc[key] = _safe_float(value, 0.0)
+        elif key in {"pnl_source", "exit_reason", "close_source", "direction"}:
+            doc[key] = str(value)
+        elif key == "metadata" and isinstance(value, dict):
+            doc[key] = value
+        else:
+            doc[key] = value
+
+    trades_col.insert_one(doc)
 
 def get_user_trades(user_id: int):
     return list(
@@ -551,11 +567,35 @@ def reset_user_trade_stats_epoch(user_id: int):
 # ADMIN – ESTADÍSTICAS DE TRADING (24h / 7d / 30d)
 # ============================================================
 
+def _empty_trade_stats(*, real_since: datetime, epoch: datetime | None, user_id: int | None = None, error: str | None = None) -> dict:
+    payload = {
+        "total": 0,
+        "wins": 0,
+        "losses": 0,
+        "break_evens": 0,
+        "decisive_trades": 0,
+        "win_rate": 0.0,
+        "win_rate_decisive": 0.0,
+        "pnl_total": 0.0,
+        "gross_profit": 0.0,
+        "gross_loss": 0.0,
+        "profit_factor": 0.0,
+        "since": real_since,
+        "epoch": epoch,
+    }
+    if user_id is not None:
+        payload["user_id"] = int(user_id)
+    if error:
+        payload["error"] = str(error)
+    return payload
+
+
 def get_admin_trade_stats(hours: int) -> dict:
     """
     Retorna estadísticas globales de trades cerrados en un período:
-      - total, wins, losses, win_rate
-      - pnl_total (suma profits)
+      - total, wins, losses, break_evens
+      - win_rate sobre total y win_rate_decisive excluyendo breakevens
+      - pnl_total (suma profits netos)
       - gross_profit (suma profits positivos)
       - gross_loss (suma pérdidas en valor absoluto)
       - profit_factor = gross_profit / gross_loss (si gross_loss==0 => 0 o inf)
@@ -593,28 +633,20 @@ def get_admin_trade_stats(hours: int) -> dict:
 
         agg = list(trades_col.aggregate(pipeline, allowDiskUse=False))
         if not agg:
-            return {
-                "total": 0,
-                "wins": 0,
-                "losses": 0,
-                "win_rate": 0.0,
-                "pnl_total": 0.0,
-                "gross_profit": 0.0,
-                "gross_loss": 0.0,
-                "profit_factor": 0.0,
-                "since": real_since,
-            "epoch": epoch,
-            }
+            return _empty_trade_stats(real_since=real_since, epoch=epoch)
 
         r = agg[0]
         total = int(r.get("total", 0) or 0)
         wins = int(r.get("wins", 0) or 0)
         losses = int(r.get("losses", 0) or 0)
+        break_evens = max(0, total - wins - losses)
+        decisive_trades = wins + losses
         pnl_total = float(r.get("pnl_total", 0.0) or 0.0)
         gross_profit = float(r.get("gross_profit", 0.0) or 0.0)
         gross_loss = float(r.get("gross_loss", 0.0) or 0.0)
 
         win_rate = (wins / total * 100.0) if total > 0 else 0.0
+        win_rate_decisive = (wins / decisive_trades * 100.0) if decisive_trades > 0 else 0.0
         if gross_loss > 0:
             profit_factor = gross_profit / gross_loss
         else:
@@ -624,7 +656,10 @@ def get_admin_trade_stats(hours: int) -> dict:
             "total": total,
             "wins": wins,
             "losses": losses,
+            "break_evens": break_evens,
+            "decisive_trades": decisive_trades,
             "win_rate": round(win_rate, 2),
+            "win_rate_decisive": round(win_rate_decisive, 2),
             "pnl_total": round(pnl_total, 6),
             "gross_profit": round(gross_profit, 6),
             "gross_loss": round(gross_loss, 6),
@@ -637,20 +672,7 @@ def get_admin_trade_stats(hours: int) -> dict:
             db_log(f"⚠ get_admin_trade_stats error hours={hours}: {e}")
         except Exception:
             pass
-        return {
-            "total": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0.0,
-            "pnl_total": 0.0,
-            "gross_profit": 0.0,
-            "gross_loss": 0.0,
-            "profit_factor": 0.0,
-            "since": real_since,
-            "epoch": epoch,
-            "error": str(e),
-        }
-
+        return _empty_trade_stats(real_since=real_since, epoch=epoch, error=str(e))
 
 
 # ============================================================
@@ -660,8 +682,9 @@ def get_admin_trade_stats(hours: int) -> dict:
 def get_user_trade_stats(user_id: int, hours: int) -> dict:
     """
     Retorna estadísticas de trades cerrados para un usuario en un período:
-      - total, wins, losses, win_rate
-      - pnl_total (suma profits)
+      - total, wins, losses, break_evens
+      - win_rate sobre total y win_rate_decisive excluyendo breakevens
+      - pnl_total (suma profits netos)
       - gross_profit (suma profits positivos)
       - gross_loss (suma pérdidas en valor absoluto)
       - profit_factor = gross_profit / gross_loss (si gross_loss==0 => 0 o inf)
@@ -709,29 +732,20 @@ def get_user_trade_stats(user_id: int, hours: int) -> dict:
 
         agg = list(trades_col.aggregate(pipeline, allowDiskUse=False))
         if not agg:
-            return {
-                "total": 0,
-                "wins": 0,
-                "losses": 0,
-                "win_rate": 0.0,
-                "pnl_total": 0.0,
-                "gross_profit": 0.0,
-                "gross_loss": 0.0,
-                "profit_factor": 0.0,
-                "since": real_since,
-                "epoch": epoch,
-                "user_id": uid,
-            }
+            return _empty_trade_stats(real_since=real_since, epoch=epoch, user_id=uid)
 
         r = agg[0]
         total = int(r.get("total", 0) or 0)
         wins = int(r.get("wins", 0) or 0)
         losses = int(r.get("losses", 0) or 0)
+        break_evens = max(0, total - wins - losses)
+        decisive_trades = wins + losses
         pnl_total = float(r.get("pnl_total", 0.0) or 0.0)
         gross_profit = float(r.get("gross_profit", 0.0) or 0.0)
         gross_loss = float(r.get("gross_loss", 0.0) or 0.0)
 
         win_rate = (wins / total * 100.0) if total > 0 else 0.0
+        win_rate_decisive = (wins / decisive_trades * 100.0) if decisive_trades > 0 else 0.0
         if gross_loss > 0:
             profit_factor = gross_profit / gross_loss
         else:
@@ -741,7 +755,10 @@ def get_user_trade_stats(user_id: int, hours: int) -> dict:
             "total": total,
             "wins": wins,
             "losses": losses,
+            "break_evens": break_evens,
+            "decisive_trades": decisive_trades,
             "win_rate": round(win_rate, 2),
+            "win_rate_decisive": round(win_rate_decisive, 2),
             "pnl_total": round(pnl_total, 6),
             "gross_profit": round(gross_profit, 6),
             "gross_loss": round(gross_loss, 6),
@@ -755,43 +772,4 @@ def get_user_trade_stats(user_id: int, hours: int) -> dict:
             db_log(f"⚠ get_user_trade_stats error user_id={user_id} hours={hours}: {e}")
         except Exception:
             pass
-        return {
-            "total": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0.0,
-            "pnl_total": 0.0,
-            "gross_profit": 0.0,
-            "gross_loss": 0.0,
-            "profit_factor": 0.0,
-            "since": real_since,
-            "epoch": epoch,
-            "user_id": uid,
-            "error": str(e),
-        }
-
-# ============================================================
-# TÉRMINOS Y CONDICIONES
-# ============================================================
-
-def accept_terms(user_id: int) -> bool:
-    """Marca aceptación de términos y guarda timestamp UTC."""
-    try:
-        from datetime import datetime
-        users_col.update_one(
-            {"user_id": int(user_id)},
-            {"$set": {"terms_accepted": True, "terms_timestamp": datetime.utcnow()}},
-            upsert=False,
-        )
-        return True
-    except Exception:
-        return False
-
-
-def has_accepted_terms(user_id: int) -> bool:
-    """Retorna True si el usuario ya aceptó términos."""
-    try:
-        u = users_col.find_one({"user_id": int(user_id)}, {"_id": 0, "terms_accepted": 1})
-        return bool((u or {}).get("terms_accepted", False))
-    except Exception:
-        return False
+        return _empty_trade_stats(real_since=real_since, epoch=epoch, user_id=uid, error=str(e))
